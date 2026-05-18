@@ -53,7 +53,7 @@ func runImport(args []string, stdout io.Writer, stderr io.Writer) int {
 	flags.StringVar(&cfg.Password, "password", "manager", "database password")
 	flags.StringVar(&cfg.Table, "table", "", "target table")
 	flags.IntVar(&cfg.Concurrency, "c", 10, "number of files to process concurrently")
-	flags.IntVar(&cfg.IgnoreLowConfidence, "ignore-low-confidence", math.MinInt, "skip records with confidence lower than this value")
+	flags.IntVar(&cfg.IgnoreLowConfidence, "ignore-low-confidence", math.MinInt, "skip records with confidence less than or equal to this value")
 
 	if err := flags.Parse(args); err != nil {
 		printUsage(stderr, "import")
@@ -89,7 +89,7 @@ func runDryRun(args []string, stdout io.Writer, stderr io.Writer) int {
 	var cfg importer.Config
 	flags.StringVar(&cfg.Dir, "dir", "", "directory containing csv files")
 	flags.IntVar(&cfg.Concurrency, "c", 10, "number of files to process concurrently")
-	flags.IntVar(&cfg.IgnoreLowConfidence, "ignore-low-confidence", math.MinInt, "skip records with confidence lower than this value")
+	flags.IntVar(&cfg.IgnoreLowConfidence, "ignore-low-confidence", math.MinInt, "skip records with confidence less than or equal to this value")
 
 	if err := flags.Parse(args); err != nil {
 		printUsage(stderr, "dryrun")

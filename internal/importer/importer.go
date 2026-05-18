@@ -281,7 +281,7 @@ func parseRecord(row []string, loc *time.Location, ignoreLowConfidence int) ([]a
 	if err != nil {
 		return nil, false, err
 	}
-	if confidence < ignoreLowConfidence {
+	if confidence <= ignoreLowConfidence {
 		return nil, true, nil
 	}
 
@@ -291,9 +291,10 @@ func parseRecord(row []string, loc *time.Location, ignoreLowConfidence int) ([]a
 	} else {
 		parsed, err := strconv.ParseFloat(valueText, 64)
 		if err != nil {
-			return nil, false, err
+			value = nil
+		} else {
+			value = parsed
 		}
-		value = parsed
 	}
 
 	return []any{name, timestamp, value, confidence}, false, nil
