@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"strings"
 
@@ -44,6 +45,7 @@ func runWithIO(args []string, stdout io.Writer, stderr io.Writer) int {
 	flags.StringVar(&cfg.Password, "password", "manager", "database password")
 	flags.StringVar(&cfg.Table, "table", "", "target table")
 	flags.IntVar(&cfg.Concurrency, "c", 10, "number of files to process concurrently")
+	flags.IntVar(&cfg.IgnoreLowConfidence, "ignore-low-confidence", math.MinInt, "skip records with confidence lower than this value")
 
 	if err := flags.Parse(args[1:]); err != nil {
 		printUsage(stderr)
@@ -78,5 +80,5 @@ func printUsageError(w io.Writer, message string) {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: kwater import -dir <dir> -db <host:port> -user <user> -password <password> -table <table> [-c <n>]")
+	fmt.Fprintln(w, "usage: kwater import -dir <dir> -db <host:port> -user <user> -password <password> -table <table> [-c <n>] [-ignore-low-confidence <n>]")
 }

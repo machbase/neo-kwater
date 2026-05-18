@@ -19,13 +19,14 @@ import (
 const csvTimeLayout = "2006-01-02 15:04:05"
 
 type Config struct {
-	Dir         string
-	DB          string
-	User        string
-	Password    string
-	Table       string
-	Concurrency int
-	Progress    Progress
+	Dir                 string
+	DB                  string
+	User                string
+	Password            string
+	Table               string
+	Concurrency         int
+	IgnoreLowConfidence int
+	Progress            Progress
 }
 
 func (c Config) Validate() error {
@@ -121,7 +122,7 @@ func Import(ctx context.Context, cfg Config, appender Appender) (Result, error) 
 		go func() {
 			defer workers.Done()
 			for job := range jobs {
-				if err := processFile(ctx, job, loc, records, state, cfg.Progress); err != nil {
+				if err := processFile(ctx, job, loc, records, state, cfg.Progress, cfg.IgnoreLowConfidence); err != nil {
 					select {
 					case errs <- err:
 					default:
@@ -190,7 +191,7 @@ func csvFiles(dir string) ([]string, error) {
 	return files, nil
 }
 
-func processFile(ctx context.Context, job fileJob, loc *time.Location, records chan<- record, state *progressState, progress Progress) error {
+func processFile(ctx context.Context, job fileJob, loc *time.Location, records chan<- record, state *progressState, progress Progress, ignoreLowConfidence int) error {
 	totalLines, err := countLines(job.path)
 	if err != nil {
 		return fmt.Errorf("count %s: %w", job.path, err)
@@ -205,7 +206,7 @@ func processFile(ctx context.Context, job fileJob, loc *time.Location, records c
 	defer file.Close()
 
 	reader := csv.NewReader(file)
-	reader.FieldsPerRecord = 4
+	reader.FieldsPerRecord = -1
 	line := 0
 	for {
 		raw, err := reader.Read()
@@ -221,9 +222,13 @@ func processFile(ctx context.Context, job fileJob, loc *time.Location, records c
 			continue
 		}
 
-		values, err := parseRecord(raw, loc)
+		values, skip, err := parseRecord(raw, loc, ignoreLowConfidence)
 		if err != nil {
 			return fmt.Errorf("parse %s line %d: %w", job.path, line, err)
+		}
+		if skip {
+			state.advance(job.index, 1)
+			continue
 		}
 
 		select {
@@ -238,26 +243,50 @@ func processFile(ctx context.Context, job fileJob, loc *time.Location, records c
 	return nil
 }
 
-func parseRecord(row []string, loc *time.Location) ([]any, error) {
+func parseRecord(row []string, loc *time.Location, ignoreLowConfidence int) ([]any, bool, error) {
+	if len(row) != 3 && len(row) != 4 {
+		return nil, false, fmt.Errorf("expected 3 or 4 fields, got %d", len(row))
+	}
+
 	name := strings.TrimSpace(row[0])
 	if name == "" {
-		return nil, errors.New("name is empty")
+		return nil, false, errors.New("name is empty")
 	}
 
 	timestamp, err := time.ParseInLocation(csvTimeLayout, strings.TrimSpace(row[1]), loc)
 	if err != nil {
-		return nil, err
-	}
-	value, err := strconv.ParseFloat(strings.TrimSpace(row[2]), 64)
-	if err != nil {
-		return nil, err
-	}
-	confidence, err := strconv.Atoi(strings.TrimSpace(row[3]))
-	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	return []any{name, timestamp, value, confidence}, nil
+	valueText := ""
+	confidenceText := ""
+	if len(row) == 3 {
+		confidenceText = strings.TrimSpace(row[2])
+	} else {
+		valueText = strings.TrimSpace(row[2])
+		confidenceText = strings.TrimSpace(row[3])
+	}
+
+	confidence, err := strconv.Atoi(confidenceText)
+	if err != nil {
+		return nil, false, err
+	}
+	if confidence < ignoreLowConfidence {
+		return nil, true, nil
+	}
+
+	var value any
+	if valueText == "" {
+		value = nil
+	} else {
+		parsed, err := strconv.ParseFloat(valueText, 64)
+		if err != nil {
+			return nil, false, err
+		}
+		value = parsed
+	}
+
+	return []any{name, timestamp, value, confidence}, false, nil
 }
 
 func countLines(path string) (int64, error) {
@@ -277,10 +306,18 @@ func countLines(path string) (int64, error) {
 }
 
 func isHeader(row []string) bool {
-	return strings.EqualFold(strings.TrimSpace(row[0]), "NAME") &&
-		strings.EqualFold(strings.TrimSpace(row[1]), "TIME") &&
-		strings.EqualFold(strings.TrimSpace(row[2]), "VALUE") &&
-		strings.EqualFold(strings.TrimSpace(row[3]), "CONFIDENCE")
+	if len(row) == 3 {
+		return strings.EqualFold(strings.TrimSpace(row[0]), "NAME") &&
+			strings.EqualFold(strings.TrimSpace(row[1]), "TIME") &&
+			strings.EqualFold(strings.TrimSpace(row[2]), "CONFIDENCE")
+	}
+	if len(row) == 4 {
+		return strings.EqualFold(strings.TrimSpace(row[0]), "NAME") &&
+			strings.EqualFold(strings.TrimSpace(row[1]), "TIME") &&
+			strings.EqualFold(strings.TrimSpace(row[2]), "VALUE") &&
+			strings.EqualFold(strings.TrimSpace(row[3]), "CONFIDENCE")
+	}
+	return false
 }
 
 func max(a int, b int) int {

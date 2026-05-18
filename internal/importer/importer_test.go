@@ -94,6 +94,32 @@ func TestImportReadsSortedCSVFilesAndAppendsTypedRows(t *testing.T) {
 	}
 }
 
+func TestImportSkipsLowConfidenceAndAllowsNullValue(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "a.csv"), "NAME,TIME,VALUE,CONFIDENCE\nKEEP,2016-04-28 04:51:00,1.25,95\nSKIP,2016-04-28 04:52:00,,89\nNULL4,2016-04-28 04:53:00,,90\nNULL3,2016-04-28 04:54:00,91\n")
+
+	appender := &fakeAppender{}
+	_, err := Import(context.Background(), Config{
+		Dir:                 dir,
+		DB:                  "127.0.0.1:5656",
+		User:                "sys",
+		Password:            "manager",
+		Table:               "EXAMPLE",
+		Concurrency:         1,
+		IgnoreLowConfidence: 90,
+	}, appender)
+	if err != nil {
+		t.Fatalf("Import() error = %v", err)
+	}
+
+	if len(appender.records) != 3 {
+		t.Fatalf("records = %d, want 3", len(appender.records))
+	}
+	assertRecord(t, appender.records[0], "KEEP", "2016-04-28 04:51:00 +0900 KST", 1.25, 95)
+	assertRecord(t, appender.records[1], "NULL4", "2016-04-28 04:53:00 +0900 KST", nil, 90)
+	assertRecord(t, appender.records[2], "NULL3", "2016-04-28 04:54:00 +0900 KST", nil, 91)
+}
+
 func TestFormatSnapshotUsesCommasAndProgressBars(t *testing.T) {
 	output := FormatSnapshot(Snapshot{
 		TotalFiles:     20000,
@@ -167,7 +193,7 @@ func mustWrite(t *testing.T, path string, contents string) {
 	}
 }
 
-func assertRecord(t *testing.T, record []any, name string, timestamp string, value float64, confidence int) {
+func assertRecord(t *testing.T, record []any, name string, timestamp string, value any, confidence int) {
 	t.Helper()
 	if got := record[0]; got != name {
 		t.Fatalf("name = %v, want %v", got, name)

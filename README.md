@@ -5,13 +5,13 @@
 ## Usage
 
 ```sh
-kwater import -dir <dir> -db <host:port> -user <user> -password <password> -table <table> [-c <n>]
+kwater import -dir <dir> -db <host:port> -user <user> -password <password> -table <table> [-c <n>] [-ignore-low-confidence <n>]
 ```
 
 Example:
 
 ```sh
-kwater import -dir ./test/data -db 127.0.0.1:5656 -user sys -password manager -table kwdam -c 10
+kwater import -dir ./test/data -db 127.0.0.1:5656 -user sys -password manager -table kwdam -c 10 -ignore-low-confidence -1
 ```
 
 Arguments:
@@ -22,6 +22,7 @@ Arguments:
 - `-password`: Database password. Default is `manager`.
 - `-table`: Target tag table name.
 - `-c`: Number of CSV files to process concurrently. Default is `10`.
+- `-ignore-low-confidence <n>`: Skip CSV records whose `CONFIDENCE` value is lower than `n`. If this option is not specified, it defaults to the minimum integer value and no records are skipped. When `VALUE` is empty or omitted, `NULL` is appended for the value field.
 
 The command must include the `import` subcommand. For example, this is invalid:
 
@@ -48,7 +49,7 @@ Fields:
 
 - `NAME`: tag name, stored as varchar.
 - `TIME`: timestamp parsed in the `Asia/Seoul` location with layout `YYYY-MM-DD HH:MM:SS`.
-- `VALUE`: float64 value.
+- `VALUE`: float64 value. Empty or omitted values are appended as `NULL`.
 - `CONFIDENCE`: integer confidence value.
 
 The header row is optional. If present, it is skipped.
