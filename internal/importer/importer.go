@@ -48,6 +48,16 @@ func (c Config) Validate() error {
 	return nil
 }
 
+func (c Config) ValidateDryRun() error {
+	if c.Dir == "" {
+		return errors.New("-dir is required")
+	}
+	if c.Concurrency <= 0 {
+		return errors.New("-c must be greater than 0")
+	}
+	return nil
+}
+
 type Appender interface {
 	Append(values ...any) error
 	Close() (success int64, fail int64, err error)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -118,6 +119,49 @@ func TestImportSkipsLowConfidenceAndAllowsNullValue(t *testing.T) {
 	assertRecord(t, appender.records[0], "KEEP", "2016-04-28 04:51:00 +0900 KST", 1.25, 95)
 	assertRecord(t, appender.records[1], "NULL4", "2016-04-28 04:53:00 +0900 KST", nil, 90)
 	assertRecord(t, appender.records[2], "NULL3", "2016-04-28 04:54:00 +0900 KST", nil, 91)
+}
+
+func TestDryRunReportsInvalidRowsAndContinues(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "a.csv"), "NAME,TIME,VALUE,CONFIDENCE\nGOOD,2016-04-28 04:51:00,1.25,95\nBADTIME,not-time,1.30,96\nBADVALUE,2016-04-28 04:52:00,abc,97\nLOW,2016-04-28 04:53:00,1.40,80\nNULLVALUE,2016-04-28 04:54:00,91\n")
+
+	var issues strings.Builder
+	progress := &captureProgress{}
+	result, err := DryRun(context.Background(), Config{
+		Dir:                 dir,
+		Concurrency:         1,
+		IgnoreLowConfidence: 90,
+		Progress:            progress,
+	}, &issues)
+	if err != nil {
+		t.Fatalf("DryRun() error = %v", err)
+	}
+
+	if result.FilesProcessed != 1 {
+		t.Fatalf("FilesProcessed = %d, want 1", result.FilesProcessed)
+	}
+	if result.RowsAppended != 2 {
+		t.Fatalf("RowsAppended = %d, want 2", result.RowsAppended)
+	}
+	if result.RowsFailed != 2 {
+		t.Fatalf("RowsFailed = %d, want 2", result.RowsFailed)
+	}
+	if !stringsContains(issues.String(), "Invalid records:") {
+		t.Fatalf("issues missing header: %s", issues.String())
+	}
+	if !stringsContains(issues.String(), filepath.Join(dir, "a.csv")+":3: BADTIME,not-time,1.30,96") {
+		t.Fatalf("issues missing bad time row: %s", issues.String())
+	}
+	if !stringsContains(issues.String(), filepath.Join(dir, "a.csv")+":4: BADVALUE,2016-04-28 04:52:00,abc,97") {
+		t.Fatalf("issues missing bad value row: %s", issues.String())
+	}
+
+	progress.mu.Lock()
+	defer progress.mu.Unlock()
+	last := progress.snapshots[len(progress.snapshots)-1]
+	if !last.ShowSummary {
+		t.Fatal("final progress did not include summary")
+	}
 }
 
 func TestFormatSnapshotUsesCommasAndProgressBars(t *testing.T) {

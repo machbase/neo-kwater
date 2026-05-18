@@ -15,8 +15,9 @@ func TestRunReportsMissingImportCommandBeforeFlag(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("exit code = %d, want 2", code)
 	}
-	assertContains(t, stderr.String(), "error: missing command: import must appear before -dir")
+	assertContains(t, stderr.String(), "error: missing command: import or dryrun must appear before -dir")
 	assertContains(t, stderr.String(), "usage: kwater import")
+	assertContains(t, stderr.String(), "usage: kwater dryrun")
 }
 
 func TestRunReportsUnknownCommand(t *testing.T) {
@@ -30,6 +31,7 @@ func TestRunReportsUnknownCommand(t *testing.T) {
 	}
 	assertContains(t, stderr.String(), "error: unknown command: load")
 	assertContains(t, stderr.String(), "usage: kwater import")
+	assertContains(t, stderr.String(), "usage: kwater dryrun")
 }
 
 func TestRunReportsMissingRequiredFlag(t *testing.T) {
@@ -43,6 +45,19 @@ func TestRunReportsMissingRequiredFlag(t *testing.T) {
 	}
 	assertContains(t, stderr.String(), "error: -table is required")
 	assertContains(t, stderr.String(), "usage: kwater import")
+}
+
+func TestRunReportsDryRunMissingRequiredFlag(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := runWithIO([]string{"dryrun"}, &stdout, &stderr)
+
+	if code != 2 {
+		t.Fatalf("exit code = %d, want 2", code)
+	}
+	assertContains(t, stderr.String(), "error: -dir is required")
+	assertContains(t, stderr.String(), "usage: kwater dryrun")
 }
 
 func assertContains(t *testing.T, text string, substr string) {

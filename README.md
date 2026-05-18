@@ -6,12 +6,19 @@
 
 ```sh
 kwater import -dir <dir> -db <host:port> -user <user> -password <password> -table <table> [-c <n>] [-ignore-low-confidence <n>]
+kwater dryrun -dir <dir> [-c <n>] [-ignore-low-confidence <n>]
 ```
 
 Example:
 
 ```sh
 kwater import -dir ./test/data -db 127.0.0.1:5656 -user sys -password manager -table kwdam -c 10 -ignore-low-confidence -1
+```
+
+Dry run example:
+
+```sh
+kwater dryrun -dir ./test/data -c 10 -ignore-low-confidence 90
 ```
 
 Arguments:
@@ -24,6 +31,8 @@ Arguments:
 - `-c`: Number of CSV files to process concurrently. Default is `10`.
 - `-ignore-low-confidence <n>`: Skip CSV records whose `CONFIDENCE` value is lower than `n`. If this option is not specified, it defaults to the minimum integer value and no records are skipped. When `VALUE` is empty or omitted, `NULL` is appended for the value field.
 
+`dryrun` uses the same CSV parsing, sorting, concurrency, confidence filtering, progress display, and final summary as `import`, but it does not connect to Machbase Neo. It checks source files only. Invalid records are printed with filename, line number, original content, and the parse error. If invalid records are found, `dryrun` exits with status `1`.
+
 The command must include the `import` subcommand. For example, this is invalid:
 
 ```sh
@@ -34,6 +43,7 @@ Use this instead:
 
 ```sh
 kwater import -dir ./test/data -db 127.0.0.1:5656 -table kwdam
+kwater dryrun -dir ./test/data
 ```
 
 ## CSV Format
@@ -62,8 +72,10 @@ create tag table kwdam (
     time datetime base time,
     value double,
     conf int
-)
+) TAG_DUPLICATE_CHECK_DURATION=1440;
 ```
+
+- TAG_DUPLICATE_CHECK_DURATION (minutes): e.g. 1440 = 24 hours
 
 ## Development
 
