@@ -1,11 +1,15 @@
 package importer
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"strings"
 	"sync"
+	"time"
 )
+
+const progressRenderInterval = time.Second
 
 type Progress interface {
 	Render(Snapshot)
@@ -17,6 +21,8 @@ type Snapshot struct {
 	CompletedFiles int
 	RowsAppended   int64
 	RowsFailed     int64
+	Elapsed        time.Duration
+	ShowSummary    bool
 }
 
 type FileProgress struct {
@@ -93,6 +99,39 @@ func renderProgress(progress Progress, snapshot Snapshot) {
 	}
 }
 
+func startProgressTicker(ctx context.Context, progress Progress, state *progressState, interval time.Duration) func() {
+	if progress == nil {
+		return func() {}
+	}
+
+	ticker := time.NewTicker(interval)
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	var once sync.Once
+
+	go func() {
+		defer close(stopped)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				renderProgress(progress, state.snapshot())
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return func() {
+		once.Do(func() {
+			close(done)
+		})
+		<-stopped
+	}
+}
+
 func FormatSnapshot(snapshot Snapshot) string {
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "Total %s of %s files processed.\n", comma(snapshot.CompletedFiles), comma(snapshot.TotalFiles))
@@ -101,6 +140,15 @@ func FormatSnapshot(snapshot Snapshot) string {
 			continue
 		}
 		fmt.Fprintf(&builder, "%s %s %s\n", file.Path, progressBar(file), fileStatus(file))
+	}
+	if snapshot.ShowSummary {
+		fmt.Fprintf(&builder, "Summary: %s files processed, %s records succeeded, %s records failed, elapsed %s, average %s per file\n",
+			comma(snapshot.CompletedFiles),
+			comma64(snapshot.RowsAppended),
+			comma64(snapshot.RowsFailed),
+			formatDuration(snapshot.Elapsed),
+			formatDuration(averageFileDuration(snapshot.Elapsed, snapshot.CompletedFiles)),
+		)
 	}
 	return builder.String()
 }
@@ -129,6 +177,20 @@ func fileStatus(file FileProgress) string {
 
 func comma(value int) string {
 	return comma64(int64(value))
+}
+
+func averageFileDuration(elapsed time.Duration, files int) time.Duration {
+	if files <= 0 {
+		return 0
+	}
+	return elapsed / time.Duration(files)
+}
+
+func formatDuration(duration time.Duration) string {
+	if duration < time.Second {
+		return duration.Round(time.Millisecond).String()
+	}
+	return duration.Round(time.Second).String()
 }
 
 func comma64(value int64) string {

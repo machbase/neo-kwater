@@ -67,6 +67,9 @@ func TestImportReadsSortedCSVFilesAndAppendsTypedRows(t *testing.T) {
 	if result.RowsAppended != 2 {
 		t.Fatalf("RowsAppended = %d, want 2", result.RowsAppended)
 	}
+	if result.Elapsed <= 0 {
+		t.Fatalf("Elapsed = %s, want positive duration", result.Elapsed)
+	}
 	if !appender.closed {
 		t.Fatal("appender was not closed")
 	}
@@ -85,6 +88,9 @@ func TestImportReadsSortedCSVFilesAndAppendsTypedRows(t *testing.T) {
 	last := progress.snapshots[len(progress.snapshots)-1]
 	if last.CompletedFiles != 2 || last.TotalFiles != 2 {
 		t.Fatalf("final progress = %d/%d, want 2/2", last.CompletedFiles, last.TotalFiles)
+	}
+	if !last.ShowSummary {
+		t.Fatal("final progress did not include summary")
 	}
 }
 
@@ -110,6 +116,50 @@ func TestFormatSnapshotUsesCommasAndProgressBars(t *testing.T) {
 	}
 }
 
+func TestProgressTickerRendersSnapshots(t *testing.T) {
+	state := newProgressState([]string{"file.csv"})
+	state.start(0, 100)
+	state.advance(0, 25)
+
+	progress := &captureProgress{}
+	ctx, cancel := context.WithCancel(context.Background())
+	stop := startProgressTicker(ctx, progress, state, 5*time.Millisecond)
+	defer stop()
+	defer cancel()
+
+	waitUntil(t, 200*time.Millisecond, func() bool {
+		progress.mu.Lock()
+		defer progress.mu.Unlock()
+		return len(progress.snapshots) > 0
+	})
+
+	progress.mu.Lock()
+	defer progress.mu.Unlock()
+	last := progress.snapshots[len(progress.snapshots)-1]
+	if len(last.Files) != 1 {
+		t.Fatalf("snapshot files = %d, want 1", len(last.Files))
+	}
+	if last.Files[0].LinesRead != 25 {
+		t.Fatalf("LinesRead = %d, want 25", last.Files[0].LinesRead)
+	}
+}
+
+func TestFormatSnapshotIncludesFinalSummary(t *testing.T) {
+	output := FormatSnapshot(Snapshot{
+		TotalFiles:     4,
+		CompletedFiles: 4,
+		RowsAppended:   1234567,
+		RowsFailed:     8,
+		Elapsed:        8 * time.Second,
+		ShowSummary:    true,
+	})
+
+	want := "Summary: 4 files processed, 1,234,567 records succeeded, 8 records failed, elapsed 8s, average 2s per file"
+	if !stringsContains(output, want) {
+		t.Fatalf("FormatSnapshot() missing summary %q in:\n%s", want, output)
+	}
+}
+
 func mustWrite(t *testing.T, path string, contents string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
@@ -131,6 +181,18 @@ func assertRecord(t *testing.T, record []any, name string, timestamp string, val
 	if got := record[3]; got != confidence {
 		t.Fatalf("confidence = %v, want %v", got, confidence)
 	}
+}
+
+func waitUntil(t *testing.T, timeout time.Duration, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("condition was not met before timeout")
 }
 
 func stringsContains(s string, substr string) bool {

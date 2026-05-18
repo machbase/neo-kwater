@@ -56,6 +56,7 @@ type Result struct {
 	FilesProcessed int
 	RowsAppended   int64
 	RowsFailed     int64
+	Elapsed        time.Duration
 }
 
 type record struct {
@@ -68,6 +69,8 @@ type fileJob struct {
 }
 
 func Import(ctx context.Context, cfg Config, appender Appender) (Result, error) {
+	startedAt := time.Now()
+
 	if err := cfg.Validate(); err != nil {
 		return Result{}, err
 	}
@@ -81,10 +84,12 @@ func Import(ctx context.Context, cfg Config, appender Appender) (Result, error) 
 	}
 
 	state := newProgressState(files)
-	renderProgress(cfg.Progress, state.snapshot())
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	stopProgress := startProgressTicker(ctx, cfg.Progress, state, progressRenderInterval)
+	defer stopProgress()
+	renderProgress(cfg.Progress, state.snapshot())
 
 	jobs := make(chan fileJob)
 	records := make(chan record, cfg.Concurrency*128)
@@ -142,11 +147,15 @@ dispatch:
 	workers.Wait()
 	close(records)
 	appendDone.Wait()
+	stopProgress()
 
 	success, fail, closeErr := appender.Close()
+	elapsed := time.Since(startedAt)
 	finalSnapshot := state.snapshot()
 	finalSnapshot.RowsAppended = success
 	finalSnapshot.RowsFailed = fail
+	finalSnapshot.Elapsed = elapsed
+	finalSnapshot.ShowSummary = true
 	renderProgress(cfg.Progress, finalSnapshot)
 
 	if appendErr != nil {
@@ -161,7 +170,7 @@ dispatch:
 		return Result{}, closeErr
 	}
 
-	return Result{FilesProcessed: finalSnapshot.CompletedFiles, RowsAppended: success, RowsFailed: fail}, nil
+	return Result{FilesProcessed: finalSnapshot.CompletedFiles, RowsAppended: success, RowsFailed: fail, Elapsed: elapsed}, nil
 }
 
 func csvFiles(dir string) ([]string, error) {
