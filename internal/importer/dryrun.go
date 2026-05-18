@@ -110,20 +110,21 @@ dispatch:
 }
 
 func dryRunFile(ctx context.Context, job fileJob, loc *time.Location, state *progressState, progress Progress, ignoreLowConfidence int, counters *dryRunCounters) error {
-	totalLines, err := countLines(job.path)
-	if err != nil {
-		return fmt.Errorf("count %s: %w", job.path, err)
-	}
-	state.start(job.index, totalLines)
-	renderProgress(progress, state.snapshot())
-
 	file, err := os.Open(job.path)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", job.path, err)
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
+	info, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", job.path, err)
+	}
+	state.start(job.index, info.Size())
+	renderProgress(progress, state.snapshot())
+
+	counting := &countingReader{reader: file}
+	scanner := bufio.NewScanner(counting)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	line := 0
 	for scanner.Scan() {
@@ -138,24 +139,24 @@ func dryRunFile(ctx context.Context, job fileJob, loc *time.Location, state *pro
 		row, err := parseCSVLine(content)
 		if err != nil {
 			counters.addIssue(DryRunIssue{fileIndex: job.index, Path: job.path, Line: line, Content: content, Err: err})
-			state.advance(job.index, 1)
+			state.advance(job.index, 1, counting.bytesRead())
 			continue
 		}
 		if line == 1 && isHeader(row) {
-			state.advance(job.index, 1)
+			state.advance(job.index, 1, counting.bytesRead())
 			continue
 		}
 
 		_, skip, err := parseRecord(row, loc, ignoreLowConfidence)
 		if err != nil {
 			counters.addIssue(DryRunIssue{fileIndex: job.index, Path: job.path, Line: line, Content: content, Err: err})
-			state.advance(job.index, 1)
+			state.advance(job.index, 1, counting.bytesRead())
 			continue
 		}
 		if !skip {
 			counters.addSuccess()
 		}
-		state.advance(job.index, 1)
+		state.advance(job.index, 1, counting.bytesRead())
 	}
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("scan %s: %w", job.path, err)

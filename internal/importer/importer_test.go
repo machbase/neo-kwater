@@ -93,6 +93,14 @@ func TestImportReadsSortedCSVFilesAndAppendsTypedRows(t *testing.T) {
 	if !last.ShowSummary {
 		t.Fatal("final progress did not include summary")
 	}
+	for _, file := range last.Files {
+		if file.TotalBytes <= 0 {
+			t.Fatalf("TotalBytes = %d, want positive value", file.TotalBytes)
+		}
+		if file.BytesRead != file.TotalBytes {
+			t.Fatalf("BytesRead = %d, TotalBytes = %d, want finished file bytes to match", file.BytesRead, file.TotalBytes)
+		}
+	}
 }
 
 func TestImportSkipsLowConfidenceAndAllowsNullValue(t *testing.T) {
@@ -169,15 +177,15 @@ func TestFormatSnapshotUsesCommasAndProgressBars(t *testing.T) {
 		TotalFiles:     20000,
 		CompletedFiles: 2,
 		Files: []FileProgress{
-			{Path: "./dir/file1.csv", Started: true, Done: true, LinesRead: 12345, TotalLines: 12345},
-			{Path: "./dir/file3.csv", Started: true, LinesRead: 34567, TotalLines: 123456},
+			{Path: "./dir/file1.csv", Started: true, Done: true, LinesRead: 12345, BytesRead: 12345, TotalBytes: 12345},
+			{Path: "./dir/file3.csv", Started: true, LinesRead: 34567, BytesRead: 34567, TotalBytes: 123456},
 		},
 	})
 
 	wantContains := []string{
 		"Total 2 of 20,000 files processed.",
 		"./dir/file1.csv #################### 12,345 lines Done",
-		"./dir/file3.csv #####............... 34,567/123,456 lines processing",
+		"./dir/file3.csv #####............... 33.8 KB/120.6 KB read, 34,567 lines processing",
 	}
 	for _, want := range wantContains {
 		if !stringsContains(output, want) {
@@ -189,7 +197,7 @@ func TestFormatSnapshotUsesCommasAndProgressBars(t *testing.T) {
 func TestProgressTickerRendersSnapshots(t *testing.T) {
 	state := newProgressState([]string{"file.csv"})
 	state.start(0, 100)
-	state.advance(0, 25)
+	state.advance(0, 25, 50)
 
 	progress := &captureProgress{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -211,6 +219,9 @@ func TestProgressTickerRendersSnapshots(t *testing.T) {
 	}
 	if last.Files[0].LinesRead != 25 {
 		t.Fatalf("LinesRead = %d, want 25", last.Files[0].LinesRead)
+	}
+	if last.Files[0].BytesRead != 50 {
+		t.Fatalf("BytesRead = %d, want 50", last.Files[0].BytesRead)
 	}
 }
 

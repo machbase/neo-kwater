@@ -28,7 +28,8 @@ type Snapshot struct {
 type FileProgress struct {
 	Path       string
 	LinesRead  int64
-	TotalLines int64
+	BytesRead  int64
+	TotalBytes int64
 	Done       bool
 	Started    bool
 }
@@ -47,22 +48,28 @@ func newProgressState(paths []string) *progressState {
 	return &progressState{files: files}
 }
 
-func (s *progressState) start(index int, totalLines int64) {
+func (s *progressState) start(index int, totalBytes int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.files[index].Started = true
-	s.files[index].TotalLines = totalLines
+	s.files[index].TotalBytes = totalBytes
 }
 
-func (s *progressState) advance(index int, lines int64) {
+func (s *progressState) advance(index int, lines int64, bytesRead int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.files[index].LinesRead += lines
+	if bytesRead > s.files[index].BytesRead {
+		s.files[index].BytesRead = bytesRead
+	}
 }
 
 func (s *progressState) finish(index int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.files[index].TotalBytes > 0 {
+		s.files[index].BytesRead = s.files[index].TotalBytes
+	}
 	if !s.files[index].Done {
 		s.files[index].Done = true
 		s.completed++
@@ -158,10 +165,10 @@ func progressBar(file FileProgress) string {
 	if file.Done {
 		return strings.Repeat("#", width)
 	}
-	if file.TotalLines <= 0 {
+	if file.TotalBytes <= 0 {
 		return strings.Repeat(".", width)
 	}
-	filled := int(file.LinesRead * width / file.TotalLines)
+	filled := int(file.BytesRead * width / file.TotalBytes)
 	if filled > width {
 		filled = width
 	}
@@ -172,7 +179,7 @@ func fileStatus(file FileProgress) string {
 	if file.Done {
 		return fmt.Sprintf("%s lines Done", comma64(file.LinesRead))
 	}
-	return fmt.Sprintf("%s/%s lines processing", comma64(file.LinesRead), comma64(file.TotalLines))
+	return fmt.Sprintf("%s/%s read, %s lines processing", formatBytes(file.BytesRead), formatBytes(file.TotalBytes), comma64(file.LinesRead))
 }
 
 func comma(value int) string {
@@ -191,6 +198,21 @@ func formatDuration(duration time.Duration) string {
 		return duration.Round(time.Millisecond).String()
 	}
 	return duration.Round(time.Second).String()
+}
+
+func formatBytes(value int64) string {
+	const unit = 1024
+	if value < unit {
+		return fmt.Sprintf("%d B", value)
+	}
+	units := []string{"KB", "MB", "GB", "TB", "PB"}
+	floatValue := float64(value)
+	unitIndex := -1
+	for floatValue >= unit && unitIndex < len(units)-1 {
+		floatValue /= unit
+		unitIndex++
+	}
+	return fmt.Sprintf("%.1f %s", floatValue, units[unitIndex])
 }
 
 func comma64(value int64) string {

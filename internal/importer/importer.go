@@ -1,7 +1,6 @@
 package importer
 
 import (
-	"bufio"
 	"context"
 	"encoding/csv"
 	"errors"
@@ -202,20 +201,21 @@ func csvFiles(dir string) ([]string, error) {
 }
 
 func processFile(ctx context.Context, job fileJob, loc *time.Location, records chan<- record, state *progressState, progress Progress, ignoreLowConfidence int) error {
-	totalLines, err := countLines(job.path)
-	if err != nil {
-		return fmt.Errorf("count %s: %w", job.path, err)
-	}
-	state.start(job.index, totalLines)
-	renderProgress(progress, state.snapshot())
-
 	file, err := os.Open(job.path)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", job.path, err)
 	}
 	defer file.Close()
 
-	reader := csv.NewReader(file)
+	info, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", job.path, err)
+	}
+	state.start(job.index, info.Size())
+	renderProgress(progress, state.snapshot())
+
+	counting := &countingReader{reader: file}
+	reader := csv.NewReader(counting)
 	reader.FieldsPerRecord = -1
 	line := 0
 	for {
@@ -228,7 +228,7 @@ func processFile(ctx context.Context, job fileJob, loc *time.Location, records c
 		}
 		line++
 		if line == 1 && isHeader(raw) {
-			state.advance(job.index, 1)
+			state.advance(job.index, 1, counting.bytesRead())
 			continue
 		}
 
@@ -237,7 +237,7 @@ func processFile(ctx context.Context, job fileJob, loc *time.Location, records c
 			return fmt.Errorf("parse %s line %d: %w", job.path, line, err)
 		}
 		if skip {
-			state.advance(job.index, 1)
+			state.advance(job.index, 1, counting.bytesRead())
 			continue
 		}
 
@@ -245,12 +245,27 @@ func processFile(ctx context.Context, job fileJob, loc *time.Location, records c
 		case <-ctx.Done():
 			return ctx.Err()
 		case records <- record{values: values}:
-			state.advance(job.index, 1)
+			state.advance(job.index, 1, counting.bytesRead())
 		}
 	}
 	state.finish(job.index)
 	renderProgress(progress, state.snapshot())
 	return nil
+}
+
+type countingReader struct {
+	reader io.Reader
+	read   int64
+}
+
+func (r *countingReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	r.read += int64(n)
+	return n, err
+}
+
+func (r *countingReader) bytesRead() int64 {
+	return r.read
 }
 
 func parseRecord(row []string, loc *time.Location, ignoreLowConfidence int) ([]any, bool, error) {
@@ -298,22 +313,6 @@ func parseRecord(row []string, loc *time.Location, ignoreLowConfidence int) ([]a
 	}
 
 	return []any{name, timestamp, value, confidence}, false, nil
-}
-
-func countLines(path string) (int64, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return 0, err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
-	var lines int64
-	for scanner.Scan() {
-		lines++
-	}
-	return lines, scanner.Err()
 }
 
 func isHeader(row []string) bool {
