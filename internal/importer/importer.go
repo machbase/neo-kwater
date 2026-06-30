@@ -317,18 +317,14 @@ func parseRecord(row []string, loc *time.Location, ignoreLowConfidence int) ([]a
 }
 
 func isHeader(row []string) bool {
-	if len(row) == 3 {
-		return strings.EqualFold(strings.TrimSpace(row[0]), "NAME") &&
-			strings.EqualFold(strings.TrimSpace(row[1]), "TIME") &&
-			strings.EqualFold(strings.TrimSpace(row[2]), "CONFIDENCE")
+	// if row does not have any float values, it is considered a header
+	for _, field := range row {
+		field = strings.TrimSpace(field)
+		if _, err := strconv.ParseFloat(field, 64); err == nil {
+			return false
+		}
 	}
-	if len(row) == 4 {
-		return strings.EqualFold(strings.TrimSpace(row[0]), "NAME") &&
-			strings.EqualFold(strings.TrimSpace(row[1]), "TIME") &&
-			strings.EqualFold(strings.TrimSpace(row[2]), "VALUE") &&
-			strings.EqualFold(strings.TrimSpace(row[3]), "CONFIDENCE")
-	}
-	return false
+	return true
 }
 
 func max(a int, b int) int {
